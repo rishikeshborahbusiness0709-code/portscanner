@@ -36,7 +36,6 @@ print(r"""
 """)
 
 print("\033[0m")  # Reset color
-""")
     print(reset)
 
 
