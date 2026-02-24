@@ -1,11 +1,28 @@
+#!/usr/bin/env python3
+
 import socket
+import threading
+import argparse
+import json
+import csv
+import sys
+import time
+from queue import Queue
 from datetime import datetime
 
-# ===============================
-# ASCII BANNER
-# ===============================
-def show_banner():
-    print("\033[92m")  # Green color start
+# =====================================
+# MATRIX INTRO (Clean Professional)
+# =====================================
+def matrix_intro():
+    green = "\033[92m"
+    reset = "\033[0m"
+
+    print(green)
+    print("Initializing Rishi Shadow Scanner...")
+    for _ in range(3):
+        print("010101010101010101010101010101010101010")
+        time.sleep(0.2)
+print("\033[92m")  # Green color start
 
 print(r"""
 ██████╗ ██╗███████╗██╗  ██╗██╗    ███████╗██╗  ██╗ █████╗ ██████╗  ██████╗ ██╗    ██╗
@@ -19,69 +36,149 @@ print(r"""
 """)
 
 print("\033[0m")  # Reset color
+""")
+    print(reset)
 
 
-# ===============================
-# PORT SCAN FUNCTION
-# ===============================
-def scan_port(ip, port):
+# =====================================
+# COMMON SERVICE MAP
+# =====================================
+COMMON_SERVICES = {
+    21: "FTP",
+    22: "SSH",
+    23: "Telnet",
+    25: "SMTP",
+    53: "DNS",
+    80: "HTTP",
+    110: "POP3",
+    143: "IMAP",
+    443: "HTTPS",
+    3306: "MySQL",
+    8080: "HTTP-Alt"
+}
+
+
+# =====================================
+# SCAN FUNCTION
+# =====================================
+def scan_port(ip, port, timeout, results):
     try:
         sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-        sock.settimeout(0.5)
+        sock.settimeout(timeout)
         result = sock.connect_ex((ip, port))
+
+        if result == 0:
+            service = COMMON_SERVICES.get(port, "Unknown")
+
+            banner = ""
+            try:
+                sock.send(b"HEAD / HTTP/1.0\r\n\r\n")
+                banner = sock.recv(1024).decode(errors="ignore").strip()
+            except:
+                pass
+
+            results.append({
+                "port": port,
+                "service": service,
+                "banner": banner[:100]
+            })
+
+            print(f"[+] {port} OPEN ({service})")
+
         sock.close()
-        return result == 0
     except:
-        return False
+        pass
 
 
-# ===============================
-# HTML REPORT GENERATION
-# ===============================
-def generate_report(ip, open_ports):
-    with open("report.html", "w") as f:
-        f.write("""
-        <html>
-        <head>
-            <title>Port Scanner Report</title>
-            <style>
-                body { background-color:black; color:#00ff00; font-family:monospace; }
-                h1 { color:#00ff00; }
-            </style>
-        </head>
-        <body>
-        """)
-        f.write("<h1>PORT SCANNER REPORT</h1>")
-        f.write(f"<p><strong>Target:</strong> {ip}</p>")
-        f.write("<ul>")
-        for port in open_ports:
-            f.write(f"<li>Port {port} is OPEN</li>")
-        f.write("</ul>")
-        f.write("</body></html>")
+# =====================================
+# THREAD WORKER
+# =====================================
+def worker():
+    while not queue.empty():
+        port = queue.get()
+        scan_port(args.target, port, args.timeout, results)
+        queue.task_done()
 
 
-# ===============================
+# =====================================
+# SAVE REPORTS
+# =====================================
+def save_reports(ip, results):
+
+    # TXT
+    with open(f"{ip}.txt", "w") as f:
+        for r in results:
+            f.write(f"{r['port']} - {r['service']}\n")
+
+    # JSON
+    with open(f"{ip}.json", "w") as f:
+        json.dump(results, f, indent=4)
+
+    # CSV
+    with open(f"{ip}.csv", "w", newline="") as f:
+        writer = csv.DictWriter(f, fieldnames=["port", "service", "banner"])
+        writer.writeheader()
+        writer.writerows(results)
+
+    print("\nReports saved as:")
+    print(f"{ip}.txt | {ip}.json | {ip}.csv")
+
+
+# =====================================
+# BASIC VULNERABILITY HINTS
+# =====================================
+def basic_vuln_check(results):
+    print("\nBasic Security Observations:")
+
+    for r in results:
+        if r["port"] == 21:
+            print("⚠ FTP open — Check for anonymous login.")
+        if r["port"] == 23:
+            print("⚠ Telnet open — Insecure protocol.")
+        if r["port"] == 80:
+            print("ℹ HTTP open — Consider HTTPS.")
+
+
+# =====================================
 # MAIN
-# ===============================
+# =====================================
 if __name__ == "__main__":
-    show_banner()
 
-    target = input("Enter target IP (example 127.0.0.1): ")
+    parser = argparse.ArgumentParser(
+        description="Rishi Shadow Professional Port Scanner"
+    )
 
-    print(f"\nScanning {target}...")
-    start_time = datetime.now()
+    parser.add_argument("target", help="Target IP address")
+    parser.add_argument("-p", "--ports", default="1-1024",
+                        help="Port range (example 20-80)")
+    parser.add_argument("-t", "--timeout", type=float,
+                        default=0.5, help="Timeout per port")
 
-    open_ports = []
+    args = parser.parse_args()
 
-    for port in range(20, 1025):
-        if scan_port(target, port):
-            print(f"[+] Port {port} is OPEN")
-            open_ports.append(port)
+    start_port, end_port = map(int, args.ports.split("-"))
 
-    generate_report(target, open_ports)
+    matrix_intro()
 
-    end_time = datetime.now()
+    print(f"Scanning {args.target} from {start_port} to {end_port}\n")
 
-    print("\nScan completed.")
-    print("Time taken:", end_time - start_time)
-    print("Report saved as report.html")
+    queue = Queue()
+    results = []
+
+    for port in range(start_port, end_port + 1):
+        queue.put(port)
+
+    for _ in range(100):
+        thread = threading.Thread(target=worker)
+        thread.daemon = True
+        thread.start()
+
+    try:
+        queue.join()
+    except KeyboardInterrupt:
+        print("\nScan interrupted by user.")
+
+    save_reports(args.target, results)
+    basic_vuln_check(results)
+
+    print("\nScan Completed.")
